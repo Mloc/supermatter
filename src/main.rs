@@ -34,12 +34,15 @@ mod supervisor;
 mod config;
 mod updater;
 
-use comm::Context;
 use msg::{Message, ToMessagePart};
 
 fn main() {
-    let cfg = config::Config::load(PathBuf::from("supermatter.cfg")).unwrap();
-    let ctx = Arc::new(Context::new("inproc://ps", "ipc://@comm-byond", "ipc://@comm-external"));
+    let cfg = Arc::new(config::Config::load(PathBuf::from("supermatter.cfg")).unwrap());
+    let ctx = Arc::new(comm::Context::new());
+
+    let mut sock = ctx.socket(zmq::DEALER).unwrap();
+    sock.connect(&cfg.internal_endpoint).unwrap();
+
     let mut suvi = supervisor::Supervisor::new(cfg, ctx.clone()).unwrap();
 
     std::thread::spawn(move || {
@@ -47,8 +50,6 @@ fn main() {
     });
 
     {
-        let mut sock = ctx.socket(zmq::DEALER).unwrap();
-        sock.connect(&ctx.internal_endpoint).unwrap();
         sock.send_message(message!("START-SERVER", "test"), 0).unwrap();
     }
 

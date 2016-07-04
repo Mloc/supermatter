@@ -66,22 +66,22 @@ pub struct Supervisor {
     byond_sock: Socket,
 
     next_ping_check: time::Instant,
-    config: config::Config,
+    config: Arc<config::Config>,
 }
 
 impl Supervisor {
-    pub fn new(cfg: config::Config, ctx: Arc<Context>) -> Result<Self, Error> {
+    pub fn new(config: Arc<config::Config>, ctx: Arc<Context>) -> Result<Self, Error> {
         let mut internal_sock = try!(ctx.socket(zmq::ROUTER));
-        try!(internal_sock.bind(&ctx.internal_endpoint));
+        try!(internal_sock.bind(&config.internal_endpoint));
 
         let mut internal_loopback = try!(ctx.socket(zmq::DEALER));
-        try!(internal_loopback.connect(&ctx.internal_endpoint));
+        try!(internal_loopback.connect(&config.internal_endpoint));
 
         let mut byond_sock = try!(ctx.socket(zmq::ROUTER));
-        try!(byond_sock.bind(&ctx.byond_endpoint));
+        try!(byond_sock.bind(&config.byond_endpoint));
 
         let mut server_states = HashMap::<String, State>::new();
-        for id in cfg.servers.keys() {
+        for id in config.servers.keys() {
             server_states.insert(id.clone(), State {server: ServerState::Stopped, update: UpdateState::Idle});
         }
 
@@ -96,7 +96,7 @@ impl Supervisor {
             byond_sock: byond_sock,
 
             next_ping_check: time::Instant::now(),
-            config: cfg,
+            config: config,
         })
     }
 
@@ -166,8 +166,6 @@ impl Supervisor {
         let peer_id = try!(msg.pop_bytes());
         let payload = try!(msg.pop_string());
 
-        println!("{}", payload);
-
         match &payload[..] {
             "START-SERVER" => {
                 try!(msg.check_len(1));
@@ -179,10 +177,11 @@ impl Supervisor {
                             state.server = ServerState::UpdatePending;
                         } else {
                             let desc: Arc<Description> = self.config.servers[&server_id].clone();
+                            let cfg = self.config.clone();
                             let ctx = self.context.clone();
                             let id = server_id.clone();
                             thread::spawn(move || {
-                                let serv = server::Server::new(desc, ctx);
+                                let serv = server::Server::new(desc, cfg, ctx);
                                 serv.start();
                             });
                             state.server = ServerState::PreStart;
@@ -239,6 +238,7 @@ impl Supervisor {
                     match state.update {
                         UpdateState::Idle => {
                             let desc: Arc<Description> = self.config.servers[&server_id].clone();
+                            let cfg = self.config.clone();
                             let ctx = self.context.clone();
 
                             let env: HashMap<String, String> = match json::decode(&env_str) {
@@ -246,7 +246,7 @@ impl Supervisor {
                                 Err(_) => return Err(Error::MalformedMessage),
                             };
                             thread::spawn(move || {
-                                let updater = updater::Updater::new(desc, env, ctx);
+                                let updater = updater::Updater::new(desc, cfg, ctx, env);
                                 updater.start();
                             });
                             state.update = UpdateState::PreUpdate;

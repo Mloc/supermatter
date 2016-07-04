@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
+use config::Config;
 use comm::Context;
 use error::Error;
 use msg::{Message, ToMessagePart};
@@ -42,23 +43,20 @@ pub struct Description {
 
 pub struct Server {
     desc: Arc<Description>,
+    config: Arc<Config>,
     context: Arc<Context>,
 }
 
 impl Server {
-    pub fn new(desc: Arc<Description>, ctx: Arc<Context>) -> Self {
+    pub fn new(desc: Arc<Description>, config: Arc<Config>, ctx: Arc<Context>) -> Self {
         Server {
             desc: desc,
+            config: config,
             context: ctx,
         }
     }
 
-    pub fn start(mut self) {
-        self.exec().unwrap();
-    }
-
-    pub fn exec(&mut self) -> Result<(), Error> {
-        println!("{:?}", self.desc.runtime);
+    pub fn start(mut self) -> Result<(), Error> {
         let mut child = Command::new(self.desc.runtime.bin_dir.join("DreamDaemon"))
                                 .current_dir(&self.desc.work_dir)
                                 .env("BYOND_SYSTEM", &self.desc.runtime.byond_system)
@@ -69,7 +67,7 @@ impl Server {
                                 .arg("-trusted")
                                 .arg("-core")
                                 .arg("-logself")
-                                .arg("-params").arg(format!("supermatter_endpoint={}&supermatter_id={}", self.context.byond_endpoint, &self.desc.id))
+                                .arg("-params").arg(format!("supermatter_endpoint={}&supermatter_id={}", self.config.byond_endpoint, &self.desc.id))
                                 .stdin(Stdio::null())
                                 .stdout(Stdio::null())
                                 .stderr(Stdio::null())
@@ -78,7 +76,7 @@ impl Server {
         let pid = child.id();
         let mut kill_sock = try!(self.context.socket(zmq::DEALER));
         try!(kill_sock.set_identity(&format!("{}-killwatcher", self.desc.id)));
-        try!(kill_sock.connect(&self.context.internal_endpoint));
+        try!(kill_sock.connect(&self.config.internal_endpoint));
         std::thread::spawn(move || {
 //            sock.send_str("HELLO", 0).unwrap();
             loop {
@@ -99,7 +97,7 @@ impl Server {
         });
 
         let mut sock = try!(self.context.socket(zmq::DEALER));
-        try!(sock.connect(&self.context.internal_endpoint));
+        try!(sock.connect(&self.config.internal_endpoint));
 
         try!(sock.send_message(message!("STARTED", self.desc.id, format!("{}-killwatcher", self.desc.id)), 0));
         child.wait().unwrap();

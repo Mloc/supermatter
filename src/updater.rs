@@ -21,28 +21,31 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use comm::Context;
+use config::Config;
 use std::collections::HashMap;
 use zmq;
 use msg::{Message, ToMessagePart};
 
 pub struct Updater {
     server: Arc<server::Description>,
-    env: HashMap<String, String>,
+    config: Arc<Config>,
     context: Arc<Context>,
+    env: HashMap<String, String>,
 }
 
 impl Updater {
-    pub fn new(server: Arc<server::Description>, env: HashMap<String, String>, ctx: Arc<Context>) -> Self {
+    pub fn new(server: Arc<server::Description>, config: Arc<Config>, ctx: Arc<Context>, env: HashMap<String, String>) -> Self {
         Updater {
             server: server,
-            env: env,
+            config: config,
             context: ctx,
+            env: env,
         }
     }
 
     pub fn start(mut self) -> Result<(), Error> {
         let mut sock = try!(self.context.socket(zmq::DEALER));
-        try!(sock.connect(&self.context.internal_endpoint));
+        try!(sock.connect(&self.config.internal_endpoint));
 
         if self.server.update_commands.is_empty() {
             try!(sock.send_message(message!("UPDATE-ERR", &self.server.id, "No update scripts defined"), 0));

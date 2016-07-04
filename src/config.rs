@@ -35,6 +35,10 @@ pub enum LoadError {
 
 #[derive(Debug)]
 pub struct Config {
+    pub internal_endpoint: String,
+    pub byond_endpoint: String,
+    pub external_endpoint: String,
+
     pub ping_interval: Duration,
     pub max_lost_pings: usize,
 
@@ -94,6 +98,10 @@ impl Config {
         }
 
         Ok(Config {
+            internal_endpoint: String::from("ipc://internal_endpoint"),
+            byond_endpoint: config_ser.byond_endpoint,
+            external_endpoint: config_ser.external_endpoint,
+
             ping_interval: duration_from_f64(config_ser.ping_interval),
             max_lost_pings: config_ser.max_lost_pings,
 
@@ -107,6 +115,9 @@ impl Config {
 
 #[derive(RustcDecodable, Debug)]
 struct ConfigSerialize {
+    byond_endpoint: String,
+    external_endpoint: String,
+
     ping_interval: f64,
     max_lost_pings: usize,
 

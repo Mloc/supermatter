@@ -21,20 +21,12 @@ use error::Error;
 use msg::Message;
 
 pub struct Context {
-    pub internal_endpoint: String,
-    pub byond_endpoint: String,
-    pub external_endpoint: String,
-
     ctx: Mutex<zmq::Context>,
 }
 
 impl Context {
-    pub fn new<S: AsRef<str>>(internal: S, byond: S, external: S) -> Self {
+    pub fn new() -> Self {
         Context {
-            internal_endpoint: internal.as_ref().to_string(),
-            byond_endpoint: byond.as_ref().to_string(),
-            external_endpoint: external.as_ref().to_string(),
-
             ctx: Mutex::new(zmq::Context::new()),
         }
     }

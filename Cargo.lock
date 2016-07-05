@@ -7,7 +7,9 @@ dependencies = [
  "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 0.7.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_json 0.7.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_macros 0.7.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "snowflake 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zmq 0.7.0 (git+https://github.com/erickt/rust-zmq.git)",
 ]
 
@@ -23,6 +25,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "itoa"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "kernel32-sys"
@@ -41,6 +48,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "log"
 version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "num-traits"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -99,12 +111,27 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "serde_json"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "itoa 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num-traits 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 0.7.12 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "serde_macros"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "serde_codegen 0.7.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "snowflake"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "winapi"

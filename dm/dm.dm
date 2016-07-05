@@ -6,14 +6,17 @@
 	for(var/p in world.params)
 		usr << "[p] = [world.params[p]]"
 
+/proc/m(a, list/b)
+	return list("", json_encode(list("[a]" = (b.len == 1? b[1]: b))))
+
 /world/New()
 	. = ..()
 	world.log << json_encode(world.params)
 	dmzmq_setup()
 	var/datum/zmq_socket/deal_sock = new(ZMQ_DEALER)
 	deal_sock.connect(world.params["supermatter_endpoint"])
-	deal_sock.send_multi(list("STARTED", world.params["supermatter_id"]))
-	deal_sock.send_multi(list("RUN-UPDATE", world.params["supermatter_id"], "{\"FOO\": \"hello, world!\"}"))
+	deal_sock.send_multi(m("ServerStarted", list(world.params["supermatter_id"])))
+	deal_sock.send_multi(m("RunUpdate", list(world.params["supermatter_id"], list("FOO" = "hello, world!"))))
 
 	var/pc = 0
 	var/updatin = 0
@@ -26,4 +29,4 @@
 		world.log << json_encode(msg)
 		if(msg[1] == "PING")
 			pc++
-			deal_sock.send_multi(list("PONG", world.params["supermatter_id"]))
+			deal_sock.send_multi(m("Pong", list(world.params["supermatter_id"])))

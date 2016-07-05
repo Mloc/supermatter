@@ -23,6 +23,11 @@ extern crate rustc_serialize;
 extern crate libc;
 extern crate kernel32;
 
+extern crate serde;
+extern crate serde_json;
+
+extern crate snowflake;
+
 #[macro_use]
 extern crate chan;
 
@@ -39,16 +44,9 @@ mod server;
 mod supervisor;
 mod config;
 mod updater;
-
-#[derive(RustcEncodable, RustcDecodable, Debug)]
-enum Foo {
-    A,
-    B(usize),
-    C(usize, String),
-}
+mod liason;
 
 fn main() {
-
     let cfg = Arc::new(config::Config::load(PathBuf::from("supermatter.cfg")).unwrap());
     let ctx = Arc::new(comm::Context::new());
 

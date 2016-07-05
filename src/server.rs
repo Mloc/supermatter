@@ -43,6 +43,7 @@ pub struct Description {
     pub id: String,
 }
 
+#[derive(Debug)]
 pub enum WatcherMessage {
     KillWatcher,
     KillServer,

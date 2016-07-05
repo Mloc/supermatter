@@ -30,6 +30,7 @@ use updater;
 use comm::{Context, Socket};
 use error::Error;
 use msg;
+use liason::Liason;
 
 use server::Description;
 
@@ -110,29 +111,40 @@ pub struct Supervisor {
 impl Supervisor {
     pub fn new(config: Arc<config::Config>, ctx: Arc<Context>) -> Result<(Self, Listener), Error> {
         let (internal_send, internal_recv) = chan::async::<msg::Internal>();
-        let (byond_send, byond_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
-        let (external_send, external_recv) = chan::async::<(msg::External, Vec<u8>)>();
+
+        let (byond_in_send, byond_in_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
+        let (byond_out_send, byond_out_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
+
+        let (external_in_send, external_in_recv) = chan::async::<(msg::External, Vec<u8>)>();
+        let (external_out_send, external_out_recv) = chan::async::<(msg::External, Vec<u8>)>();
 
         let mut server_states = HashMap::<String, State>::new();
         for id in config.servers.keys() {
             server_states.insert(id.clone(), State {server: ServerState::Stopped, update: UpdateState::Idle});
+            internal_send.send(msg::Internal::StartServer(id.clone()));
         }
 
+        let byond_liason = try!(Liason::new(byond_in_send, byond_out_recv, ctx.clone(), config.byond_endpoint.clone()));
+        byond_liason.run();
+
+        let external_liason = try!(Liason::new(external_in_send, external_out_recv, ctx.clone(), config.external_endpoint.clone()));
+        external_liason.run();
+
         Ok((Supervisor {
-            servers: server_states,
-            kill_handler: HashMap::<String, chan::Sender<server::WatcherMessage>>::new(),
+                servers: server_states,
+                kill_handler: HashMap::<String, chan::Sender<server::WatcherMessage>>::new(),
 
-            internal_send: internal_send,
-            byond_send: byond_send,
-            external_send: external_send,
+                internal_send: internal_send,
+                byond_send: byond_out_send,
+                external_send: external_out_send,
 
-            config: config,
-            context: ctx,
-        },
-        Listener {
-            internal_recv: internal_recv,
-            byond_recv: byond_recv,
-            external_recv: external_recv,
+                config: config,
+                context: ctx,
+            },
+            Listener {
+                internal_recv: internal_recv,
+                byond_recv: byond_in_recv,
+                external_recv: external_in_recv,
         }))
     }
 

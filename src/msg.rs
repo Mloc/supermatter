@@ -18,6 +18,7 @@ use chan;
 use server;
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub enum Internal {
     StartServer(String),
     KillServer(String),
@@ -31,6 +32,7 @@ pub enum Internal {
     UpdateComplete(String),
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Byond {
     ServerStarted(String),
     ServerStopping(String),
@@ -44,5 +46,6 @@ pub enum Byond {
     UpdateComplete,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum External {
 }

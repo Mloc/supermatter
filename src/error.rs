@@ -23,7 +23,6 @@ use std::string::FromUtf8Error;
 pub enum Error {
     SocketError(zmq::Error),
     UnicodeDecodeError(FromUtf8Error),
-    MalformedMessage,
 }
 
 impl error::Error for Error {

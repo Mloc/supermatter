@@ -92,20 +92,6 @@ impl Socket {
         self.send(msg.as_bytes(), flags)
     }
 
-    pub fn subscribe(&mut self, filter: &str) -> Result<(), Error> {
-        match self.zmq_sock.set_subscribe(filter.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::SocketError(e)),
-        }
-    }
-
-    pub fn unsubscribe(&mut self, filter: &str) -> Result<(), Error> {
-        match self.zmq_sock.set_unsubscribe(filter.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::SocketError(e)),
-        }
-    }
-
     pub fn recv_more(&mut self, flags: i32) -> Result<Option<Vec<u8>>, Error> {
         match self.zmq_sock.get_rcvmore() {
             Ok(b) => match b {
@@ -132,53 +118,7 @@ impl Socket {
         }
     }
 
-    pub fn set_identity(&mut self, id: &str) -> Result<(), Error> {
-        match self.zmq_sock.set_identity(id.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::SocketError(e)),
-        }
-    }
-
-    pub fn get_identity(&mut self) -> Result<Vec<u8>, Error> {
-        match self.zmq_sock.get_identity() {
-            Ok(v) => Ok(v),
-            Err(e) => Err(Error::SocketError(e)),
-        }
-    }
-
     pub fn as_poll_item<'a>(&'a self, events: i16) -> zmq::PollItem<'a> {
         self.zmq_sock.as_poll_item(events)
     }
-
-    pub fn get_rcvmore(&self) -> Result<bool, Error> {
-        match self.zmq_sock.get_rcvmore() {
-            Ok(b) => Ok(b),
-            Err(e) => Err(Error::SocketError(e)),
-        }
-    }
-
-/*    pub fn recv_message(&mut self, flags: i32) -> Result<Message, Error> {
-        let mut msg = Message::new();
-        msg.push(try!(self.recv(flags)));
-
-        while try!(self.get_rcvmore()) {
-            msg.push(try!(self.recv(flags)));
-        }
-
-        Ok(msg)
-    }
-
-    pub fn send_message(&mut self, msg: Message, flags: i32) -> Result<(), Error> {
-        let mut vec = msg.to_vec();
-        let last = match vec.pop_back() {
-            Some(t) => t,
-            None => return Err(Error::MalformedMessage),
-        };
-
-        for v in vec.iter() {
-            try!(self.send(v, zmq::SNDMORE | flags));
-        }
-        try!(self.send(&last[..], flags));
-        Ok(())
-    }*/
 }

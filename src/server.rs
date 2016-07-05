@@ -19,12 +19,9 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use config::Config;
-use comm::Context;
-use error::Error;
 
 use std;
 
-use zmq;
 use byond::Runtime;
 
 use chan;
@@ -64,7 +61,7 @@ impl Server {
         }
     }
 
-    pub fn start(mut self) -> Result<(), Error> {
+    pub fn start(self) {
         let mut child = Command::new(self.desc.runtime.bin_dir.join("DreamDaemon"))
                                 .current_dir(&self.desc.work_dir)
                                 .env("BYOND_SYSTEM", &self.desc.runtime.byond_system)
@@ -103,15 +100,13 @@ impl Server {
         self.channel.send(msg::Internal::ServerStarted(self.desc.id.clone(), chan_send));
         child.wait().unwrap();
         self.channel.send(msg::Internal::ServerStopped(self.desc.id.clone()));
-
-        Ok(())
     }
 }
 
-use libc;
-use kernel32;
 
 // yeah these need error handling.
+#[cfg(unix)]
+use libc;
 #[cfg(unix)]
 fn kill_process(pid: u32) {
     unsafe {
@@ -120,6 +115,8 @@ fn kill_process(pid: u32) {
 }
 
 // untested, zmq crate doesn't compile on windows
+#[cfg(windows)]
+use kernel32;
 #[cfg(windows)]
 fn kill_process(pid: u32) {
     unsafe {

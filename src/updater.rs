@@ -15,49 +15,42 @@
 */
 
 use server;
-use error::Error;
 
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use comm::Context;
-use config::Config;
 use std::collections::HashMap;
-use zmq;
 use chan;
 use msg;
 
 pub struct Updater {
     server: Arc<server::Description>,
-    config: Arc<Config>,
     channel: chan::Sender<msg::Internal>,
     env: HashMap<String, String>,
 }
 
 impl Updater {
-    pub fn new(server: Arc<server::Description>, config: Arc<Config>, chan: chan::Sender<msg::Internal>, env: HashMap<String, String>) -> Self {
+    pub fn new(server: Arc<server::Description>, chan: chan::Sender<msg::Internal>, env: HashMap<String, String>) -> Self {
         Updater {
             server: server,
-            config: config,
             channel: chan,
             env: env,
         }
     }
 
-    pub fn start(mut self) -> Result<(), Error> {
+    pub fn start(self) {
         if self.server.update_commands.is_empty() {
             self.channel.send(msg::Internal::UpdateError(self.server.id.clone(), "No update scripts defined".to_string()));
-            return Ok(())
+            return
         }
             self.channel.send(msg::Internal::UpdateStarted(self.server.id.clone()));
 
         for (i, path) in self.server.update_commands.iter().enumerate() {
             let mut cmd = Command::new(path.clone());
-            let mut cmd = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-            let mut cmd = cmd.current_dir(&self.server.work_dir);
+            cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            cmd.current_dir(&self.server.work_dir);
 
             for (k, v) in self.env.iter() {
-                let mut cmd = cmd.env(k, v);
+                cmd.env(k, v);
             }
 
             let status = match cmd.status() {
@@ -66,7 +59,7 @@ impl Updater {
                         Ok(())
                     } else {
                         match out.code() {
-                            Some(x) => Err(format!("Update command #{} failed with exit code {}", i + 1, out)),
+                            Some(_) => Err(format!("Update command #{} failed with exit code {}", i + 1, out)),
                             None => Err(format!("Update command #{} failed", i + 1)),
                         }
                     }
@@ -80,13 +73,11 @@ impl Updater {
                 Ok(()) => {},
                 Err(error_str) => {
                     self.channel.send(msg::Internal::UpdateError(self.server.id.clone(), error_str));
-                    return Ok(())
+                    return
                 }
             }
         }
 
         self.channel.send(msg::Internal::UpdateComplete(self.server.id.clone()));
-
-        Ok(())
     }
 }

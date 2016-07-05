@@ -14,7 +14,7 @@
   limitations under the License.
 */
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Runtime {
@@ -27,13 +27,6 @@ impl Runtime {
         Runtime {
             byond_system: PathBuf::from("/usr/share/byond/"),
             bin_dir: PathBuf::from("/usr/share/byond/bin/"),
-        }
-    }
-
-    pub fn local<P: AsRef<Path>>(path: P) -> Self {
-        Runtime {
-            byond_system: path.as_ref().to_owned(),
-            bin_dir: path.as_ref().join("bin/"),
         }
     }
 }

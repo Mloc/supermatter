@@ -18,16 +18,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time;
 use std::thread;
-use rustc_serialize::json;
 
-use zmq;
 use chan;
 
 use server;
-use comm;
 use config;
 use updater;
-use comm::{Context, Socket};
+use comm::Context;
 use error::Error;
 use msg;
 use liason::Liason;
@@ -64,7 +61,7 @@ pub struct Listener {
 }
 
 impl Listener {
-    pub fn start(mut self, suvi: &mut Supervisor) {
+    pub fn start(self, suvi: &mut Supervisor) {
         let ping = chan::tick_ms((suvi.config.ping_interval.as_secs() * 1000) as u32 + (suvi.config.ping_interval.subsec_nanos() / 1000000));
 
         let ref internal = self.internal_recv;
@@ -88,9 +85,12 @@ impl Listener {
                         None => continue,
                     }
                 },
-    //            external.recv() -> (msg, id) => {
-      //              self.handle_external_message(msg, id)
-        //        },
+                external.recv() -> msg => {
+                    match msg {
+                        Some((msg, id)) => suvi.handle_external_message(msg, id),
+                        None => continue,
+                    }
+                },
             }
         }
     }
@@ -105,7 +105,6 @@ pub struct Supervisor {
     external_send: chan::Sender<(msg::External, Vec<u8>)>,
 
     config: Arc<config::Config>,
-    context: Arc<Context>,
 }
 
 impl Supervisor {
@@ -139,7 +138,6 @@ impl Supervisor {
                 external_send: external_out_send,
 
                 config: config,
-                context: ctx,
             },
             Listener {
                 internal_recv: internal_recv,
@@ -148,7 +146,7 @@ impl Supervisor {
         }))
     }
 
-    fn ping_check(&mut self) -> Result<(), Error> {
+    fn ping_check(&mut self) {
         for (id, mut state) in self.servers.iter_mut() {
             match state.server {
                 ServerState::Stopped | ServerState::PreStart | ServerState::UpdatePending => {},
@@ -172,10 +170,9 @@ impl Supervisor {
                 },
             }
         }
-        Ok(())
     }
 
-    fn handle_internal_message(&mut self, msg: msg::Internal) -> Result<(), Error> {
+    fn handle_internal_message(&mut self, msg: msg::Internal) {
         match msg {
             msg::Internal::StartServer(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
@@ -231,11 +228,10 @@ impl Supervisor {
                     match state.update {
                         UpdateState::Idle => {
                             let desc: Arc<Description> = self.config.servers[&server_id].clone();
-                            let cfg = self.config.clone();
                             let chan = self.internal_send.clone();
 
                             thread::spawn(move || {
-                                let updater = updater::Updater::new(desc, cfg, chan, env);
+                                let updater = updater::Updater::new(desc, chan, env);
                                 updater.start();
                             });
                             state.update = UpdateState::PreUpdate;
@@ -278,11 +274,9 @@ impl Supervisor {
                 }
             },
         };
-
-        Ok(())
     }
 
-    fn handle_byond_message(&mut self, msg: msg::Byond, peer_id: Vec<u8>) -> Result<(), Error> {
+    fn handle_byond_message(&mut self, msg: msg::Byond, peer_id: Vec<u8>) {
         match msg {
             msg::Byond::ServerStarted(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
@@ -311,7 +305,10 @@ impl Supervisor {
             msg::Byond::UpdateError(_) |
             msg::Byond::UpdateComplete => {},
         };
+    }
 
-        Ok(())
+    fn handle_external_message(&mut self, msg: msg::External, peer_id: Vec<u8>) {
+        match msg {
+        };
     }
 }

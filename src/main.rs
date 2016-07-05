@@ -34,9 +34,7 @@ extern crate chan;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[macro_use]
 mod msg;
-
 mod error;
 mod comm;
 mod byond;
@@ -52,11 +50,5 @@ fn main() {
 
     let (mut suvi, listener) = supervisor::Supervisor::new(cfg, ctx.clone()).unwrap();
 
-    std::thread::spawn(move || {
-        listener.start(&mut suvi);
-    });
-
-    loop {
-        std::thread::sleep(std::time::Duration::new(1000, 0));
-    }
+    listener.start(&mut suvi);
 }

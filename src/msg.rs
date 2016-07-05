@@ -14,89 +14,35 @@
   limitations under the License.
 */
 
-use std::collections::VecDeque;
-use error::Error;
+use chan;
+use server;
+use std::collections::HashMap;
 
-pub struct Message {
-    parts: VecDeque<Vec<u8>>,
+pub enum Internal {
+    StartServer(String),
+    KillServer(String),
+
+    ServerStarted(String, chan::Sender<server::WatcherMessage>),
+    ServerStopped(String),
+
+    RunUpdate(String, HashMap<String, String>),
+    UpdateStarted(String),
+    UpdateError(String, String),
+    UpdateComplete(String),
 }
 
-impl Message {
-    pub fn new() -> Self {
-        Message {
-            parts: VecDeque::<Vec<u8>>::new(),
-        }
-    }
+pub enum Byond {
+    ServerStarted(String),
+    ServerStopping(String),
 
-    pub fn push(&mut self, part: Vec<u8>) {
-        self.parts.push_back(part)
-    }
+    Ping,
+    Pong(String),
 
-    pub fn check_len(&self, len: usize) -> Result<(), Error> {
-        if len != self.parts.len() {
-            Err(Error::MalformedMessage)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn pop_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        match self.parts.pop_front() {
-            Some(v) => Ok(v),
-            None => Err(Error::MalformedMessage),
-        }
-    }
-
-    pub fn pop_string(&mut self) -> Result<String, Error> {
-        let bytes = try!(self.pop_bytes());
-
-        match String::from_utf8(bytes) {
-            Ok(s) => Ok(s),
-            Err(e) => Err(Error::UnicodeDecodeError(e)),
-        }
-    }
-
-    pub fn to_vec(self) -> VecDeque<Vec<u8>> {
-        self.parts
-    }
+    RunUpdate(String, HashMap<String, String>),
+    UpdateStarted,
+    UpdateError(String),
+    UpdateComplete,
 }
 
-macro_rules! message {
-    ( $( $x:expr ),* ) => {
-        {
-            let mut msg = Message::new();
-            $(
-                msg.push($x.to_message_part());
-            )*
-            msg
-        }
-    };
-}
-
-pub trait ToMessagePart {
-    fn to_message_part(&self) -> Vec<u8>;
-}
-
-impl ToMessagePart for Vec<u8> {
-    fn to_message_part(&self) -> Vec<u8> {
-        self.clone()
-    }
-}
-
-impl<'a> ToMessagePart for &'a [u8] {
-    fn to_message_part(&self) -> Vec<u8> {
-        Vec::<u8>::from(*self)
-    }
-}
-
-impl<'a> ToMessagePart for &'a str {
-    fn to_message_part(&self) -> Vec<u8> {
-        self.as_bytes().to_message_part()
-    }
-}
-
-impl ToMessagePart for String {
-    fn to_message_part(&self) -> Vec<u8> {
-        (&self[..]).to_message_part()
-    }
+pub enum External {
 }

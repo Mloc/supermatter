@@ -14,11 +14,17 @@
   limitations under the License.
 */
 
+#![feature(custom_derive, plugin)]
+#![plugin(serde_macros)]
+
 extern crate zmq;
 extern crate rustc_serialize;
 
 extern crate libc;
 extern crate kernel32;
+
+#[macro_use]
+extern crate chan;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,24 +40,23 @@ mod supervisor;
 mod config;
 mod updater;
 
-use msg::{Message, ToMessagePart};
+#[derive(RustcEncodable, RustcDecodable, Debug)]
+enum Foo {
+    A,
+    B(usize),
+    C(usize, String),
+}
 
 fn main() {
+
     let cfg = Arc::new(config::Config::load(PathBuf::from("supermatter.cfg")).unwrap());
     let ctx = Arc::new(comm::Context::new());
 
-    let mut sock = ctx.socket(zmq::DEALER).unwrap();
-    sock.connect(&cfg.internal_endpoint).unwrap();
-
-    let mut suvi = supervisor::Supervisor::new(cfg, ctx.clone()).unwrap();
+    let (mut suvi, listener) = supervisor::Supervisor::new(cfg, ctx.clone()).unwrap();
 
     std::thread::spawn(move || {
-        suvi.start();
+        listener.start(&mut suvi);
     });
-
-    {
-        sock.send_message(message!("START-SERVER", "test"), 0).unwrap();
-    }
 
     loop {
         std::thread::sleep(std::time::Duration::new(1000, 0));

@@ -24,34 +24,32 @@ use comm::Context;
 use config::Config;
 use std::collections::HashMap;
 use zmq;
-use msg::{Message, ToMessagePart};
+use chan;
+use msg;
 
 pub struct Updater {
     server: Arc<server::Description>,
     config: Arc<Config>,
-    context: Arc<Context>,
+    channel: chan::Sender<msg::Internal>,
     env: HashMap<String, String>,
 }
 
 impl Updater {
-    pub fn new(server: Arc<server::Description>, config: Arc<Config>, ctx: Arc<Context>, env: HashMap<String, String>) -> Self {
+    pub fn new(server: Arc<server::Description>, config: Arc<Config>, chan: chan::Sender<msg::Internal>, env: HashMap<String, String>) -> Self {
         Updater {
             server: server,
             config: config,
-            context: ctx,
+            channel: chan,
             env: env,
         }
     }
 
     pub fn start(mut self) -> Result<(), Error> {
-        let mut sock = try!(self.context.socket(zmq::DEALER));
-        try!(sock.connect(&self.config.internal_endpoint));
-
         if self.server.update_commands.is_empty() {
-            try!(sock.send_message(message!("UPDATE-ERR", &self.server.id, "No update scripts defined"), 0));
+            self.channel.send(msg::Internal::UpdateError(self.server.id.clone(), "No update scripts defined".to_string()));
             return Ok(())
         }
-        try!(sock.send_message(message!("UPDATE-STARTED", &self.server.id), 0));
+            self.channel.send(msg::Internal::UpdateStarted(self.server.id.clone()));
 
         for (i, path) in self.server.update_commands.iter().enumerate() {
             let mut cmd = Command::new(path.clone());
@@ -81,13 +79,13 @@ impl Updater {
             match status {
                 Ok(()) => {},
                 Err(error_str) => {
-                    try!(sock.send_message(message!("UPDATE-ERR", &self.server.id, error_str), 0));
+                    self.channel.send(msg::Internal::UpdateError(self.server.id.clone(), error_str));
                     return Ok(())
                 }
             }
         }
 
-        try!(sock.send_message(message!("UPDATE-COMPLETE", &self.server.id), 0));
+        self.channel.send(msg::Internal::UpdateComplete(self.server.id.clone()));
 
         Ok(())
     }

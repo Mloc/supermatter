@@ -21,12 +21,14 @@ use std::sync::Arc;
 use config::Config;
 use comm::Context;
 use error::Error;
-use msg::{Message, ToMessagePart};
 
 use std;
 
 use zmq;
 use byond::Runtime;
+
+use chan;
+use msg;
 
 #[derive(Debug)]
 pub struct Description {
@@ -41,18 +43,23 @@ pub struct Description {
     pub id: String,
 }
 
+pub enum WatcherMessage {
+    KillWatcher,
+    KillServer,
+}
+
 pub struct Server {
     desc: Arc<Description>,
     config: Arc<Config>,
-    context: Arc<Context>,
+    channel: chan::Sender<msg::Internal>,
 }
 
 impl Server {
-    pub fn new(desc: Arc<Description>, config: Arc<Config>, ctx: Arc<Context>) -> Self {
+    pub fn new(desc: Arc<Description>, config: Arc<Config>, chan: chan::Sender<msg::Internal>) -> Self {
         Server {
             desc: desc,
             config: config,
-            context: ctx,
+            channel: chan,
         }
     }
 
@@ -73,35 +80,28 @@ impl Server {
                                 .stderr(Stdio::null())
                                 .spawn().unwrap();
 
+
+        let (chan_send, chan_recv) = chan::async::<WatcherMessage>();
         let pid = child.id();
-        let mut kill_sock = try!(self.context.socket(zmq::DEALER));
-        try!(kill_sock.set_identity(&format!("{}-killwatcher", self.desc.id)));
-        try!(kill_sock.connect(&self.config.internal_endpoint));
         std::thread::spawn(move || {
-//            sock.send_str("HELLO", 0).unwrap();
             loop {
-                let cmd = match kill_sock.recv_string(0) {
-                    Ok(c) => c,
-                    Err(Error::SocketError(e)) => panic!(e),
-                    Err(_) => continue,
+                let msg = match chan_recv.recv() {
+                    Some(m) => m,
+                    None => return,
                 };
-                match &cmd[..] {
-                    "KILL-SERVER" => {
+                match msg {
+                    WatcherMessage::KillWatcher => return,
+                    WatcherMessage::KillServer => {
                         kill_process(pid);
                         return
                     },
-                    "KILL-WATCHER" => return,
-                    _ => continue
                 };
             }
         });
 
-        let mut sock = try!(self.context.socket(zmq::DEALER));
-        try!(sock.connect(&self.config.internal_endpoint));
-
-        try!(sock.send_message(message!("STARTED", self.desc.id, format!("{}-killwatcher", self.desc.id)), 0));
+        self.channel.send(msg::Internal::ServerStarted(self.desc.id.clone(), chan_send));
         child.wait().unwrap();
-        try!(sock.send_message(message!("STOPPED", self.desc.id), 0));
+        self.channel.send(msg::Internal::ServerStopped(self.desc.id.clone()));
 
         Ok(())
     }

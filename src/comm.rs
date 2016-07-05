@@ -18,7 +18,7 @@ use zmq;
 use std::sync::Mutex;
 
 use error::Error;
-use msg::Message;
+//use msg::Message;
 
 pub struct Context {
     ctx: Mutex<zmq::Context>,
@@ -157,7 +157,7 @@ impl Socket {
         }
     }
 
-    pub fn recv_message(&mut self, flags: i32) -> Result<Message, Error> {
+/*    pub fn recv_message(&mut self, flags: i32) -> Result<Message, Error> {
         let mut msg = Message::new();
         msg.push(try!(self.recv(flags)));
 
@@ -180,5 +180,5 @@ impl Socket {
         }
         try!(self.send(&last[..], flags));
         Ok(())
-    }
+    }*/
 }

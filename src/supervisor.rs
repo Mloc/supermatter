@@ -21,6 +21,7 @@ use std::thread;
 use rustc_serialize::json;
 
 use zmq;
+use chan;
 
 use server;
 use comm;
@@ -28,7 +29,7 @@ use config;
 use updater;
 use comm::{Context, Socket};
 use error::Error;
-use msg::{Message, ToMessagePart};
+use msg;
 
 use server::Description;
 
@@ -55,83 +56,84 @@ enum UpdateState {
     Updating,
 }
 
+pub struct Listener {
+    internal_recv: chan::Receiver<msg::Internal>,
+    byond_recv: chan::Receiver<(msg::Byond, Vec<u8>)>,
+    external_recv: chan::Receiver<(msg::External, Vec<u8>)>,
+}
+
+impl Listener {
+    pub fn start(mut self, suvi: &mut Supervisor) {
+        let ping = chan::tick_ms((suvi.config.ping_interval.as_secs() * 1000) as u32 + (suvi.config.ping_interval.subsec_nanos() / 1000000));
+
+        let ref internal = self.internal_recv;
+        let ref byond = self.byond_recv;
+        let ref external = self.external_recv;
+
+        loop {
+            chan_select! {
+                ping.recv() => {
+                    suvi.ping_check()
+                },
+                internal.recv() -> msg => {
+                    match msg {
+                        Some(msg) => suvi.handle_internal_message(msg),
+                        None => continue,
+                    }
+                },
+                byond.recv() -> msg => {
+                    match msg {
+                        Some((msg, id)) => suvi.handle_byond_message(msg, id),
+                        None => continue,
+                    }
+                },
+    //            external.recv() -> (msg, id) => {
+      //              self.handle_external_message(msg, id)
+        //        },
+            }
+        }
+    }
+}
+
 pub struct Supervisor {
     servers: HashMap<String, State>,
+    kill_handler: HashMap<String, chan::Sender<server::WatcherMessage>>,
 
-    kill_handler: HashMap<String, Vec<u8>>,
+    internal_send: chan::Sender<msg::Internal>,
+    byond_send: chan::Sender<(msg::Byond, Vec<u8>)>,
+    external_send: chan::Sender<(msg::External, Vec<u8>)>,
 
-    context: Arc<Context>,
-    internal_sock: Socket,
-    internal_loopback: Socket,
-    byond_sock: Socket,
-
-    next_ping_check: time::Instant,
     config: Arc<config::Config>,
+    context: Arc<Context>,
 }
 
 impl Supervisor {
-    pub fn new(config: Arc<config::Config>, ctx: Arc<Context>) -> Result<Self, Error> {
-        let mut internal_sock = try!(ctx.socket(zmq::ROUTER));
-        try!(internal_sock.bind(&config.internal_endpoint));
-
-        let mut internal_loopback = try!(ctx.socket(zmq::DEALER));
-        try!(internal_loopback.connect(&config.internal_endpoint));
-
-        let mut byond_sock = try!(ctx.socket(zmq::ROUTER));
-        try!(byond_sock.bind(&config.byond_endpoint));
+    pub fn new(config: Arc<config::Config>, ctx: Arc<Context>) -> Result<(Self, Listener), Error> {
+        let (internal_send, internal_recv) = chan::async::<msg::Internal>();
+        let (byond_send, byond_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
+        let (external_send, external_recv) = chan::async::<(msg::External, Vec<u8>)>();
 
         let mut server_states = HashMap::<String, State>::new();
         for id in config.servers.keys() {
             server_states.insert(id.clone(), State {server: ServerState::Stopped, update: UpdateState::Idle});
         }
 
-        Ok(Supervisor {
+        Ok((Supervisor {
             servers: server_states,
+            kill_handler: HashMap::<String, chan::Sender<server::WatcherMessage>>::new(),
 
-            kill_handler: HashMap::<String, Vec<u8>>::new(),
+            internal_send: internal_send,
+            byond_send: byond_send,
+            external_send: external_send,
 
-            context: ctx,
-            internal_sock: internal_sock,
-            internal_loopback: internal_loopback,
-            byond_sock: byond_sock,
-
-            next_ping_check: time::Instant::now(),
             config: config,
-        })
-    }
-
-    pub fn start(mut self) {
-        loop {
-            match zmq::poll(&mut [self.internal_sock.as_poll_item(zmq::POLLIN), self.byond_sock.as_poll_item(zmq::POLLIN)], self.get_timeout()) {
-                Ok(0) => {
-                    self.next_ping_check = time::Instant::now() + self.config.ping_interval;
-                    self.ping_check().unwrap();
-                },
-                Ok(_) => {
-                    match self.handle_internal_message() {
-                        Ok(_) => {},
-                        Err(Error::SocketError(zmq::Error::EAGAIN)) => {},
-                        Err(e) => panic!("{}", e),
-                    };
-                    match self.handle_byond_message() {
-                        Ok(_) => {},
-                        Err(Error::SocketError(zmq::Error::EAGAIN)) => {},
-                        Err(e) => panic!("{}", e),
-                    };
-                },
-                Err(e) => panic!("{}", e),
-            }
-        }
-    }
-
-    fn get_timeout(&self) -> i64 {
-        let cur_time = time::Instant::now();
-        if cur_time >= self.next_ping_check {
-            0
-        } else {
-            let delta = self.next_ping_check - cur_time;
-            ((delta.as_secs() * 1000) + (delta.subsec_nanos() / 1000000) as u64) as i64
-        }
+            context: ctx,
+        },
+        Listener {
+            internal_recv: internal_recv,
+            byond_recv: byond_recv,
+            external_recv: external_recv,
+        }))
     }
 
     fn ping_check(&mut self) -> Result<(), Error> {
@@ -140,19 +142,19 @@ impl Supervisor {
                 ServerState::Stopped | ServerState::PreStart | ServerState::UpdatePending => {},
                 ServerState::Starting(ref startup_time) => {
                     if *startup_time + self.config.starting_timeout < time::Instant::now() {
-                        try!(self.internal_loopback.send_message(message!("KILL-SERVER", id), 0));
+                        self.internal_send.send(msg::Internal::KillServer(id.clone()));
                     }
                 },
                 ServerState::Stopping(ref shutdown_time) => {
                     if *shutdown_time + self.config.stopping_timeout < time::Instant::now() {
-                        try!(self.internal_loopback.send_message(message!("KILL-SERVER", id), 0));
+                        self.internal_send.send(msg::Internal::KillServer(id.clone()));
                     }
                 },
                 ServerState::Serving(ref mut ping_checks, ref peer_id) => {
                     if *ping_checks >= self.config.max_lost_pings {
-                        try!(self.internal_loopback.send_message(message!("KILL-SERVER", id), 0));
+                        self.internal_send.send(msg::Internal::KillServer(id.clone()));
                     } else {
-                        try!(self.byond_sock.send_message(message!(peer_id, "PING"), 0));
+                        self.byond_send.send((msg::Byond::Ping, peer_id.clone()));
                         *ping_checks += 1;
                     }
                 },
@@ -161,16 +163,9 @@ impl Supervisor {
         Ok(())
     }
 
-    fn handle_internal_message(&mut self) -> Result<(), Error> {
-        let mut msg = try!(self.internal_sock.recv_message(zmq::DONTWAIT));
-        let peer_id = try!(msg.pop_bytes());
-        let payload = try!(msg.pop_string());
-
-        match &payload[..] {
-            "START-SERVER" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+    fn handle_internal_message(&mut self, msg: msg::Internal) -> Result<(), Error> {
+        match msg {
+            msg::Internal::StartServer(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::Stopped = state.server {
                         if let UpdateState::Updating = state.update {
@@ -178,10 +173,10 @@ impl Supervisor {
                         } else {
                             let desc: Arc<Description> = self.config.servers[&server_id].clone();
                             let cfg = self.config.clone();
-                            let ctx = self.context.clone();
-                            let id = server_id.clone();
+                            let chan = self.internal_send.clone();
+
                             thread::spawn(move || {
-                                let serv = server::Server::new(desc, cfg, ctx);
+                                let serv = server::Server::new(desc, cfg, chan);
                                 serv.start();
                             });
                             state.server = ServerState::PreStart;
@@ -189,184 +184,122 @@ impl Supervisor {
                     }
                 }
             },
-            "KILL-SERVER" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Internal::KillServer(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     match state.server {
                         ServerState::Starting(_) | ServerState::Stopping(_) | ServerState::Serving(_, _) => {
-                            try!(self.internal_sock.send_message(message!(self.kill_handler[&server_id], "KILL-SERVER"), 0));
+                            self.kill_handler[&server_id].send(server::WatcherMessage::KillServer);
                         },
                         // potential race condition with PreStart, however very unlikely
                         ServerState::Stopped | ServerState::PreStart | ServerState::UpdatePending => {},
                     }
                 }
             },
-            "STARTED" => {
-                try!(msg.check_len(2));
-                let server_id = try!(msg.pop_string());
-                let kill_handler = try!(msg.pop_bytes());
-
+            msg::Internal::ServerStarted(server_id, kill_handler) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::PreStart = state.server  {
                         self.kill_handler.insert(server_id.clone(), kill_handler);
-                        state.server  = ServerState::Starting(time::Instant::now());
-                        try!(self.internal_sock.send_message(message!(peer_id, "OK"), 0));
+                        state.server = ServerState::Starting(time::Instant::now());
+//                        try!(self.internal_sock.send_message(message!(peer_id, "OK"), 0));
                     } else {
-                        try!(self.internal_sock.send_message(message!(peer_id, "ERR"), 0));
+//                        try!(self.internal_sock.send_message(message!(peer_id, "ERR"), 0));
                     }
                 } else {
-                    try!(self.internal_sock.send_message(message!(peer_id, "ERR"), 0));
+//                    try!(self.internal_sock.send_message(message!(peer_id, "ERR"), 0));
                 }
             },
-            "STOPPED" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Internal::ServerStopped(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.server = ServerState::Stopped;
                 }
-                try!(self.internal_sock.send_message(message!(self.kill_handler[&server_id], "KILL-WATCHER"), 0));
+                self.kill_handler[&server_id].send(server::WatcherMessage::KillWatcher);
             },
-            "RUN-UPDATE" => {
-                try!(msg.check_len(2));
-                let server_id = try!(msg.pop_string());
-                let env_str = try!(msg.pop_string());
-
+            msg::Internal::RunUpdate(server_id, env) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     match state.update {
                         UpdateState::Idle => {
                             let desc: Arc<Description> = self.config.servers[&server_id].clone();
                             let cfg = self.config.clone();
-                            let ctx = self.context.clone();
+                            let chan = self.internal_send.clone();
 
-                            let env: HashMap<String, String> = match json::decode(&env_str) {
-                                Ok(e) => e,
-                                Err(_) => return Err(Error::MalformedMessage),
-                            };
                             thread::spawn(move || {
-                                let updater = updater::Updater::new(desc, cfg, ctx, env);
+                                let updater = updater::Updater::new(desc, cfg, chan, env);
                                 updater.start();
                             });
                             state.update = UpdateState::PreUpdate;
                         },
                         UpdateState::PreUpdate | UpdateState::Updating => {
-                            try!(self.internal_sock.send_message(message!(peer_id, "ERR", "Update in progress"), 0));
+                            // inform of error, somehow?
                         }
                     }
                 }
             },
-            "UPDATE-STARTED" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Internal::UpdateStarted(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let UpdateState::PreUpdate = state.update {
                         state.update = UpdateState::Updating;
                         if let ServerState::Serving(_, ref peer_id) = state.server {
-                            try!(self.byond_sock.send_message(message!(peer_id, "UPDATE-STARTED"), 0));
+                            self.byond_send.send((msg::Byond::UpdateStarted, peer_id.clone()));
                         }
                     }
                 }
             },
-            "UPDATE-ERR" => {
-                try!(msg.check_len(2));
-                let server_id = try!(msg.pop_string());
-                let error_str = try!(msg.pop_string());
-
+            msg::Internal::UpdateError(server_id, error) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.update = UpdateState::Idle;
                     if let ServerState::Serving(_, ref peer_id) = state.server {
-                        try!(self.byond_sock.send_message(message!(peer_id, "UPDATE-ERR", error_str), 0));
+                        self.byond_send.send((msg::Byond::UpdateError(error), peer_id.clone()));
                     }
                 }
             },
-            "UPDATE-COMPLETE" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Internal::UpdateComplete(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let UpdateState::Updating = state.update {
                         state.update = UpdateState::Idle;
                         if let ServerState::UpdatePending = state.server {
                             state.server = ServerState::Stopped;
-                            try!(self.internal_loopback.send_message(message!("START-SERVER", server_id), 0));
+                            self.internal_send.send(msg::Internal::StartServer(server_id));
                         } else if let ServerState::Serving(_, ref peer_id) = state.server {
-                            try!(self.byond_sock.send_message(message!(peer_id, "UPDATE-COMPLETE"), 0));
+                            self.byond_send.send((msg::Byond::UpdateComplete, peer_id.clone()));
                         }
                     }
                 }
-            }
-            _ => {},
+            },
         };
 
         Ok(())
     }
 
-    fn handle_byond_message(&mut self) -> Result<(), Error> {
-        let mut msg = try!(self.byond_sock.recv_message(zmq::DONTWAIT));
-        let peer_id = try!(msg.pop_bytes());
-        let payload = try!(msg.pop_string());
-
-        match &payload[..] {
-            "STARTED" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+    fn handle_byond_message(&mut self, msg: msg::Byond, peer_id: Vec<u8>) -> Result<(), Error> {
+        match msg {
+            msg::Byond::ServerStarted(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.server = ServerState::Serving(0, peer_id);
                 }
             },
-            "STOPPING" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Byond::ServerStopping(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
 
                 }
             },
-            "PONG" => {
-                try!(msg.check_len(1));
-                let server_id = try!(msg.pop_string());
-
+            msg::Byond::Pong(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::Serving(ref mut count, _) = state.server {
                         *count = 0;
                     }
                 }
             },
-            "RUN-UPDATE" => {
-                try!(msg.check_len(2));
-                let server_id = try!(msg.pop_string());
-                let env_str = try!(msg.pop_string());
-                self.internal_loopback.send_message(message!("RUN-UPDATE", server_id, env_str), 0);
+            msg::Byond::RunUpdate(server_id, env) => {
+                self.internal_send.send(msg::Internal::RunUpdate(server_id, env));
             },
-            _ => {},
+            // BYOND-end exclusive messages
+            // maybe we should have two types
+            msg::Byond::Ping |
+            msg::Byond::UpdateStarted |
+            msg::Byond::UpdateError(_) |
+            msg::Byond::UpdateComplete => {},
         };
 
         Ok(())
-    }
-}
-
-// make sure to update SVConfigSerialize in config alongside this
-// serde will save us from this
-struct Config {
-    ping_interval: time::Duration,
-    max_lost_pings: usize,
-
-    starting_timeout: time::Duration,
-    stopping_timeout: time::Duration,
-}
-
-impl Config {
-    fn default() -> Self {
-        Config {
-            ping_interval: time::Duration::new(2, 0),
-            max_lost_pings: 5,
-
-            starting_timeout: time::Duration::new(10, 0),
-            stopping_timeout: time::Duration::new(10, 0),
-        }
     }
 }

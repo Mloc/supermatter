@@ -20,25 +20,37 @@ use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum Internal {
+    // Server ID
     StartServer(String),
+    // Server ID
     KillServer(String),
 
+    // Server ID; control channel for server watcher
     ServerStarted(String, chan::Sender<server::WatcherMessage>),
+    // Server ID
     ServerStopped(String),
 
+    // Server ID, String->String map of env vars to set for update
     RunUpdate(String, HashMap<String, String>),
+    // Server ID
     UpdateStarted(String),
+    // Server ID, error message
     UpdateError(String, String),
+    // Server ID
     UpdateComplete(String),
 }
 
 #[derive(Debug, Deserialize)]
 pub enum ByondIn {
+    // Server ID
     ServerStarted(String),
+    // Server ID
     ServerStopping(String),
 
+    // Server ID
     Pong(String),
 
+    // Server ID, String->String map of env vars to set for update
     RunUpdate(String, HashMap<String, String>),
 }
 
@@ -46,6 +58,7 @@ pub enum ByondIn {
 pub enum ByondOut {
     Ping,
     UpdateStarted,
+    // Error message
     UpdateError(String),
     UpdateComplete,
 }

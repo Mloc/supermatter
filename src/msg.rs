@@ -32,20 +32,28 @@ pub enum Internal {
     UpdateComplete(String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Byond {
+#[derive(Debug, Deserialize)]
+pub enum ByondIn {
     ServerStarted(String),
     ServerStopping(String),
 
-    Ping,
     Pong(String),
 
     RunUpdate(String, HashMap<String, String>),
+}
+
+#[derive(Debug, Serialize)]
+pub enum ByondOut {
+    Ping,
     UpdateStarted,
     UpdateError(String),
     UpdateComplete,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum External {
+#[derive(Debug, Deserialize)]
+pub enum ExternalIn {
+}
+
+#[derive(Debug, Serialize)]
+pub enum ExternalOut {
 }

@@ -56,8 +56,8 @@ enum UpdateState {
 
 pub struct Listener {
     internal_recv: chan::Receiver<msg::Internal>,
-    byond_recv: chan::Receiver<(msg::Byond, Vec<u8>)>,
-    external_recv: chan::Receiver<(msg::External, Vec<u8>)>,
+    byond_recv: chan::Receiver<(msg::ByondIn, Vec<u8>)>,
+    external_recv: chan::Receiver<(msg::ExternalIn, Vec<u8>)>,
 }
 
 impl Listener {
@@ -101,21 +101,21 @@ pub struct Supervisor {
     kill_handler: HashMap<String, chan::Sender<server::WatcherMessage>>,
 
     internal_send: chan::Sender<msg::Internal>,
-    byond_send: chan::Sender<(msg::Byond, Vec<u8>)>,
-    external_send: chan::Sender<(msg::External, Vec<u8>)>,
+    byond_send: chan::Sender<(msg::ByondOut, Vec<u8>)>,
+    external_send: chan::Sender<(msg::ExternalOut, Vec<u8>)>,
 
     config: Arc<config::Config>,
 }
 
 impl Supervisor {
     pub fn new(config: Arc<config::Config>, ctx: Arc<Context>) -> Result<(Self, Listener), Error> {
-        let (internal_send, internal_recv) = chan::async::<msg::Internal>();
+        let (internal_send, internal_recv) = chan::async();
 
-        let (byond_in_send, byond_in_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
-        let (byond_out_send, byond_out_recv) = chan::async::<(msg::Byond, Vec<u8>)>();
+        let (byond_in_send, byond_in_recv) = chan::async();
+        let (byond_out_send, byond_out_recv) = chan::async();
 
-        let (external_in_send, external_in_recv) = chan::async::<(msg::External, Vec<u8>)>();
-        let (external_out_send, external_out_recv) = chan::async::<(msg::External, Vec<u8>)>();
+        let (external_in_send, external_in_recv) = chan::async();
+        let (external_out_send, external_out_recv) = chan::async();
 
         let mut server_states = HashMap::<String, State>::new();
         for id in config.servers.keys() {
@@ -123,7 +123,7 @@ impl Supervisor {
             internal_send.send(msg::Internal::StartServer(id.clone()));
         }
 
-        let byond_liason = try!(Liason::new(byond_in_send, byond_out_recv, ctx.clone(), config.byond_endpoint.clone()));
+        let byond_liason = Liason::new(byond_in_send, byond_out_recv, ctx.clone(), config.byond_endpoint.clone()).unwrap();
         byond_liason.run();
 
         let external_liason = try!(Liason::new(external_in_send, external_out_recv, ctx.clone(), config.external_endpoint.clone()));
@@ -164,7 +164,7 @@ impl Supervisor {
                     if *ping_checks >= self.config.max_lost_pings {
                         self.internal_send.send(msg::Internal::KillServer(id.clone()));
                     } else {
-                        self.byond_send.send((msg::Byond::Ping, peer_id.clone()));
+                        self.byond_send.send((msg::ByondOut::Ping, peer_id.clone()));
                         *ping_checks += 1;
                     }
                 },
@@ -173,8 +173,9 @@ impl Supervisor {
     }
 
     fn handle_internal_message(&mut self, msg: msg::Internal) {
+        use msg::Internal::*;
         match msg {
-            msg::Internal::StartServer(server_id) => {
+            StartServer(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::Stopped = state.server {
                         if let UpdateState::Updating = state.update {
@@ -193,7 +194,7 @@ impl Supervisor {
                     }
                 }
             },
-            msg::Internal::KillServer(server_id) => {
+            KillServer(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     match state.server {
                         ServerState::Starting(_) | ServerState::Stopping(_) | ServerState::Serving(_, _) => {
@@ -204,7 +205,7 @@ impl Supervisor {
                     }
                 }
             },
-            msg::Internal::ServerStarted(server_id, kill_handler) => {
+            ServerStarted(server_id, kill_handler) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::PreStart = state.server  {
                         self.kill_handler.insert(server_id.clone(), kill_handler);
@@ -217,13 +218,13 @@ impl Supervisor {
 //                    try!(self.internal_sock.send_message(message!(peer_id, "ERR"), 0));
                 }
             },
-            msg::Internal::ServerStopped(server_id) => {
+            ServerStopped(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.server = ServerState::Stopped;
                 }
                 self.kill_handler[&server_id].send(server::WatcherMessage::KillWatcher);
             },
-            msg::Internal::RunUpdate(server_id, env) => {
+            RunUpdate(server_id, env) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     match state.update {
                         UpdateState::Idle => {
@@ -242,25 +243,25 @@ impl Supervisor {
                     }
                 }
             },
-            msg::Internal::UpdateStarted(server_id) => {
+            UpdateStarted(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let UpdateState::PreUpdate = state.update {
                         state.update = UpdateState::Updating;
                         if let ServerState::Serving(_, ref peer_id) = state.server {
-                            self.byond_send.send((msg::Byond::UpdateStarted, peer_id.clone()));
+                            self.byond_send.send((msg::ByondOut::UpdateStarted, peer_id.clone()));
                         }
                     }
                 }
             },
-            msg::Internal::UpdateError(server_id, error) => {
+            UpdateError(server_id, error) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.update = UpdateState::Idle;
                     if let ServerState::Serving(_, ref peer_id) = state.server {
-                        self.byond_send.send((msg::Byond::UpdateError(error), peer_id.clone()));
+                        self.byond_send.send((msg::ByondOut::UpdateError(error), peer_id.clone()));
                     }
                 }
             },
-            msg::Internal::UpdateComplete(server_id) => {
+            UpdateComplete(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let UpdateState::Updating = state.update {
                         state.update = UpdateState::Idle;
@@ -268,7 +269,7 @@ impl Supervisor {
                             state.server = ServerState::Stopped;
                             self.internal_send.send(msg::Internal::StartServer(server_id));
                         } else if let ServerState::Serving(_, ref peer_id) = state.server {
-                            self.byond_send.send((msg::Byond::UpdateComplete, peer_id.clone()));
+                            self.byond_send.send((msg::ByondOut::UpdateComplete, peer_id.clone()));
                         }
                     }
                 }
@@ -276,38 +277,34 @@ impl Supervisor {
         };
     }
 
-    fn handle_byond_message(&mut self, msg: msg::Byond, peer_id: Vec<u8>) {
+    fn handle_byond_message(&mut self, msg: msg::ByondIn, peer_id: Vec<u8>) {
+        use msg::ByondIn::*;
         match msg {
-            msg::Byond::ServerStarted(server_id) => {
+            ServerStarted(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     state.server = ServerState::Serving(0, peer_id);
                 }
             },
-            msg::Byond::ServerStopping(server_id) => {
+            ServerStopping(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
 
                 }
             },
-            msg::Byond::Pong(server_id) => {
+            Pong(server_id) => {
                 if let Some(state) = self.servers.get_mut(&server_id) {
                     if let ServerState::Serving(ref mut count, _) = state.server {
                         *count = 0;
                     }
                 }
             },
-            msg::Byond::RunUpdate(server_id, env) => {
+            RunUpdate(server_id, env) => {
                 self.internal_send.send(msg::Internal::RunUpdate(server_id, env));
             },
-            // BYOND-end exclusive messages
-            // maybe we should have two types
-            msg::Byond::Ping |
-            msg::Byond::UpdateStarted |
-            msg::Byond::UpdateError(_) |
-            msg::Byond::UpdateComplete => {},
         };
     }
 
-    fn handle_external_message(&mut self, msg: msg::External, peer_id: Vec<u8>) {
+    fn handle_external_message(&mut self, msg: msg::ExternalIn, peer_id: Vec<u8>) {
+        use msg::ExternalIn::*;
         match msg {
         };
     }

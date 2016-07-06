@@ -30,7 +30,7 @@ use comm::{Context, Socket};
 use error::Error;
 
 
-pub struct Liason<M> {
+pub struct Liason<S, D> {
     // just to keep the Arc alive for the lifetime of the sockets
     _zmq_context: Arc<Context>,
 
@@ -38,13 +38,13 @@ pub struct Liason<M> {
     sock_internal_send: Socket,
     sock_internal_recv: Socket,
 
-    chan_send: chan::Sender<(M, Vec<u8>)>,
-    chan_recv: chan::Receiver<(M, Vec<u8>)>,
+    chan_send: chan::Sender<(D, Vec<u8>)>,
+    chan_recv: chan::Receiver<(S, Vec<u8>)>,
 }
 
 use std::marker;
-impl<M: Serialize + Deserialize + marker::Send + 'static> Liason<M> {
-    pub fn new(chan_send: chan::Sender<(M, Vec<u8>)>, chan_recv: chan::Receiver<(M, Vec<u8>)>, context: Arc<Context>, bind_endpoint: String) -> Result<Self, Error> {
+impl<S: Serialize + marker::Send + 'static, D: Deserialize + marker::Send + 'static> Liason<S, D> {
+    pub fn new(chan_send: chan::Sender<(D, Vec<u8>)>, chan_recv: chan::Receiver<(S, Vec<u8>)>, context: Arc<Context>, bind_endpoint: String) -> Result<Self, Error> {
         let mut sock_external = try!(context.socket(zmq::ROUTER));
         try!(sock_external.bind(&bind_endpoint));
 
@@ -84,7 +84,7 @@ impl<M: Serialize + Deserialize + marker::Send + 'static> Liason<M> {
         });
     }
 
-    fn zmq_proc(mut sock_internal: Socket, mut sock_external: Socket, chan_send: chan::Sender<(M, Vec<u8>)>) {
+    fn zmq_proc(mut sock_internal: Socket, mut sock_external: Socket, chan_send: chan::Sender<(D, Vec<u8>)>) {
         loop {
             // worst line of this whole project
             // can't put the pollset into a var because of the borrow checker
@@ -106,7 +106,7 @@ impl<M: Serialize + Deserialize + marker::Send + 'static> Liason<M> {
         }
     }
 
-    fn zmq_proc_recv(sock_external: &mut Socket, chan_send: &chan::Sender<(M, Vec<u8>)>) -> Result<(), Error> {
+    fn zmq_proc_recv(sock_external: &mut Socket, chan_send: &chan::Sender<(D, Vec<u8>)>) -> Result<(), Error> {
         let id = try!(sock_external.recv(zmq::DONTWAIT));
 
         match try!(sock_external.recv_more(0)) {
@@ -123,7 +123,7 @@ impl<M: Serialize + Deserialize + marker::Send + 'static> Liason<M> {
             _ => return Ok(())
         };
 
-        let msg: M = match serde_json::from_str(&data) {
+        let msg: D = match serde_json::from_str(&data) {
             Ok(m) => m,
             Err(_) => return Ok(()),
         };
@@ -157,7 +157,7 @@ impl<M: Serialize + Deserialize + marker::Send + 'static> Liason<M> {
         Ok(())
     }
 
-    fn chan_proc(chan: chan::Receiver<(M, Vec<u8>)>, mut sock_internal: Socket) {
+    fn chan_proc(chan: chan::Receiver<(S, Vec<u8>)>, mut sock_internal: Socket) {
         loop {
             let (msg, id) = match chan.recv() {
                 Some((msg, id)) => (msg, id),

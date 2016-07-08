@@ -42,8 +42,8 @@ pub struct Liason<S, D> {
     chan_recv: chan::Receiver<(S, Vec<u8>)>,
 }
 
-use std::marker;
-impl<S: Serialize + marker::Send + 'static, D: Deserialize + marker::Send + 'static> Liason<S, D> {
+use std::marker::Send;
+impl<S: Serialize + Send + 'static, D: Deserialize + Send + 'static> Liason<S, D> {
     pub fn new(chan_send: chan::Sender<(D, Vec<u8>)>, chan_recv: chan::Receiver<(S, Vec<u8>)>, context: Arc<Context>, bind_endpoint: String) -> Result<Self, Error> {
         let mut sock_external = try!(context.socket(zmq::ROUTER));
         try!(sock_external.bind(&bind_endpoint));

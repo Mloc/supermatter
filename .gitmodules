@@ -1,3 +1,0 @@
-[submodule "dm/dmzmq"]
-	path = dm/dmzmq
-	url = https://github.com/mloc/dmzmq.git
